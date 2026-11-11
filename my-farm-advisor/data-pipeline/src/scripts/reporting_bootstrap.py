@@ -265,6 +265,25 @@ def ensure_canonical_field_artifacts(
     _write_text(base / "logs" / "pipeline_runs.jsonl", "", overwrite=False)
 
 
+def _farm_state_from_boundary(grower_slug: str, farm_slug: str) -> str:
+    """Two-letter state for farm metadata, read from the seeded boundaries."""
+    boundary = farm_root(grower_slug, farm_slug) / "boundary" / "field_boundaries.geojson"
+    if not boundary.exists():
+        return "IA"
+    try:
+        import geopandas as gpd
+
+        frame = gpd.read_file(boundary, rows=1)
+        if frame.empty or "state_fips" not in frame.columns:
+            return "IA"
+        fips = str(frame["state_fips"].iloc[0]).zfill(2)
+        from farm_dashboard import STATE_FIPS
+
+        return STATE_FIPS.get(fips, ("IA", ""))[0] or "IA"
+    except Exception:  # noqa: BLE001 - metadata is informational, never fatal
+        return "IA"
+
+
 def ensure_canonical_data_tree(
     grower_slug: str = DEFAULT_GROWER,
     farm_slug: str = DEFAULT_FARM,
@@ -406,18 +425,20 @@ def ensure_canonical_data_tree(
     (farm / "derived" / "summaries").mkdir(parents=True, exist_ok=True)
     (farm / "derived" / "dashboards").mkdir(parents=True, exist_ok=True)
     (farm / "derived" / "tables").mkdir(parents=True, exist_ok=True)
-    _write_json(
-        farm / "farm.json",
-        {
-            "grower_slug": grower_slug,
-            "farm_slug": farm_slug,
-            "display_name": farm_name,
-            "state": "IA",
-            "country": "US",
-            "default_crs": "EPSG:4326",
-            "notes": "Canonical farm metadata",
-        },
-    )
+    farm_metadata = farm / "farm.json"
+    if not farm_metadata.exists():
+        _write_json(
+            farm_metadata,
+            {
+                "grower_slug": grower_slug,
+                "farm_slug": farm_slug,
+                "display_name": farm_name,
+                "state": _farm_state_from_boundary(grower_slug, farm_slug),
+                "country": "US",
+                "default_crs": "EPSG:4326",
+                "notes": "Canonical farm metadata",
+            },
+        )
     _write_text(farm / "logs" / "pipeline_runs.jsonl", "", overwrite=False)
 
     slugs = field_slugs_from_inventory(inventory_path=inventory_path)
