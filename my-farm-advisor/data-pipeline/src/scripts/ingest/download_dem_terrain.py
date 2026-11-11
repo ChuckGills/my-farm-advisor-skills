@@ -773,7 +773,10 @@ def _prepare_valid_dem_trial(
                 outputs["dem_clipped"],
                 field_crs="EPSG:4326",
                 buffer_meters=_buf,
-                nodata=DEFAULT_NODATA,
+                # Let clip_dem_tiles_to_buffer resolve nodata from the source
+                # metadata. Forcing DEFAULT_NODATA (nan) here defeats the
+                # integer-dtype coercion in _resolve_nodata and makes
+                # rasterio.merge fail on int16 sources (ALOS AW3D30, NASADEM).
                 source_vertical_datum="unknown",
                 target_vertical_datum="unknown",
             )

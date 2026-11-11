@@ -493,11 +493,23 @@ def _discover_farms(
             boundary = farm_dir / "boundary" / "field_boundaries.geojson"
             if not boundary.exists():
                 continue
+            # Prefer the display name recorded when the farm was seeded; falling
+            # back to the slug silently renamed refreshed farms in reports.
+            farm_name = f_slug.replace("-", " ").title()
+            metadata_path = farm_dir / "farm.json"
+            if metadata_path.exists():
+                try:
+                    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    metadata = {}
+                recorded_name = str(metadata.get("display_name") or "").strip()
+                if recorded_name:
+                    farm_name = recorded_name
             farms.append(
                 {
                     "grower_slug": g_slug,
                     "farm_slug": f_slug,
-                    "farm_name": f_slug.replace("-", " ").title(),
+                    "farm_name": farm_name,
                 }
             )
     if not farms:
