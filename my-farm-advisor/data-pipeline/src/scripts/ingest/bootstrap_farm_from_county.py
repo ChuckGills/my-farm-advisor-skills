@@ -292,6 +292,12 @@ def main() -> None:
     )
     parser.add_argument("--county-name", required=True, help="County name, e.g. Boone")
     parser.add_argument("--count", type=int, default=4, help="Number of fields to sample")
+    parser.add_argument(
+        "--min-acres",
+        type=float,
+        default=0.5,
+        help="Minimum field area in acres (default: 0.5)",
+    )
     parser.add_argument("--seed", type=int, default=42, help="Deterministic seed")
     parser.add_argument("--grower-slug", required=True)
     parser.add_argument("--farm-slug", required=True)
@@ -335,6 +341,7 @@ def main() -> None:
         county_fips=county_fips,
         county_name=county_name,
     )
+    fields = fields[fields["area_acres"] >= args.min_acres].reset_index(drop=True)
     sampled = _sample_fields(fields, count=args.count, seed=args.seed)
     if sampled.empty:
         raise RuntimeError("No eligible farmland polygons found for requested county")

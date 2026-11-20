@@ -207,6 +207,18 @@ def main() -> None:
         help="NASA POWER time standard for farm weather outputs",
     )
     parser.add_argument(
+        "--cdl-latest-year",
+        type=int,
+        default=2023,
+        help="Latest CDL year for the farm crop composition window",
+    )
+    parser.add_argument(
+        "--cdl-window-years",
+        type=int,
+        default=5,
+        help="Number of CDL years for the farm crop composition window",
+    )
+    parser.add_argument(
         "--dem-context-meters",
         type=float,
         default=20.0,
@@ -299,6 +311,12 @@ def main() -> None:
         "--source-policy",
         args.dem_source_policy,
     )
+    cdl_command_args = (
+        "--cdl-latest-year",
+        str(args.cdl_latest_year),
+        "--cdl-window-years",
+        str(args.cdl_window_years),
+    )
     steps = [
         ("ingest/download_fields.py", "Canonical field boundaries", (), False),
         (
@@ -310,7 +328,7 @@ def main() -> None:
         ("ingest/download_soil.py", "Field soil tables (SSURGO / Ontario survey / Australia SLGA-ASF routing)", (), False),
         ("ingest/download_soilgrids.py", "SoilGrids 250 m global grid clips + field stats", (), False),
         ("ingest/download_weather.py", "Weather history tables", (), False),
-        ("ingest/download_cdl.py", "Shared CDL/ACI history tables", (), False),
+        ("ingest/download_cdl.py", "Shared CDL/ACI history tables", cdl_command_args, False),
         ("ingest/download_satellite_imagery.py", "Raw satellite TIFFs", (), False),
         ("reporting/generate_ndvi_composites.py", "NDVI yearly composites", (), False),
         ("reporting/generate_ndvi_cards.py", "NDVI cached cards", (), False),

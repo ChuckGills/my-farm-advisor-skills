@@ -259,18 +259,23 @@ def main():
     if not us_fields.empty:
         print("State CDL coverage:", ", ".join(state_fips_values))
 
-    target_years = _target_cdl_years()
+    explicit_years = _parse_years(args.cdl_years)
+    target_years = explicit_years or _target_cdl_years(
+        window_years=args.cdl_window_years, latest_year=args.cdl_latest_year
+    )
+    max_years = len(target_years) if explicit_years else args.cdl_window_years
+    desired_years = target_years if explicit_years else target_years[:max_years]
     cached_years = [
         year
-        for year in target_years
+        for year in desired_years
         if farm_cdl_year_table_path(grower_slug, farm_slug, year).exists()
     ]
     if (
         not force
-        and len(cached_years) >= 5
+        and len(cached_years) == len(desired_years)
         and farm_cdl_rotation_path(grower_slug, farm_slug).exists()
     ):
-        selected_years = sorted(cached_years[:5], reverse=True)
+        selected_years = sorted(cached_years)
         composition_path = farm_cdl_full_composition_path(
             grower_slug,
             farm_slug,
@@ -351,7 +356,7 @@ def main():
         print(f"  Saved: {year_output}")
         crop_mix_frames.append(cdl_year)
         completed_years.append(year)
-        if len(completed_years) >= 5:
+        if len(completed_years) >= max_years:
             break
 
     if not crop_mix_frames:

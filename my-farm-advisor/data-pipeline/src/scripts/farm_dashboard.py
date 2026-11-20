@@ -341,6 +341,8 @@ def _run_pipeline_for_farm(
     farm_name: str,
     inventory_path: Path,
     force: bool,
+    cdl_latest_year: int | None = None,
+    cdl_window_years: int | None = None,
 ) -> None:
     cmd = [
         sys.executable,
@@ -356,6 +358,10 @@ def _run_pipeline_for_farm(
         "--inventory-csv",
         str(inventory_path),
     ]
+    if cdl_latest_year is not None:
+        cmd.extend(["--cdl-latest-year", str(cdl_latest_year)])
+    if cdl_window_years is not None:
+        cmd.extend(["--cdl-window-years", str(cdl_window_years)])
     if force:
         cmd.append("--force")
     _run(cmd)
@@ -442,6 +448,8 @@ def create_command(args: argparse.Namespace) -> None:
         farm_name=farm_name,
         inventory_path=inventory,
         force=args.force,
+        cdl_latest_year=args.cdl_latest_year,
+        cdl_window_years=args.cdl_window_years,
     )
 
     print(
