@@ -230,9 +230,17 @@ def load_farm(meta: FarmMeta, *, allow_archive: bool) -> FarmData:
     data.cdl = load_cdl(meta, ids, allow_archive=allow_archive)
     if data.cdl is not None:
         data.notes.extend(data.cdl.notes)
+    else:
+        data.notes.append(
+            f"{meta.short}: no current CDL composition table for these fields "
+            "(pipeline CDL step not finished or archive fallback disabled)"
+        )
     data.weather = load_weather(meta, ids, allow_archive=allow_archive)
     if data.weather is not None:
         data.notes.extend(data.weather.notes)
+        missing = len(ids) - len(data.weather.sources)
+        if missing:
+            data.notes.append(f"{meta.short}: {missing} fields have no usable weather series")
     return data
 
 

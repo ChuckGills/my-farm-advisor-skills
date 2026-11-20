@@ -120,8 +120,13 @@ def main() -> None:
     for name in selected:
         try:
             results[name] = CATEGORIES[name](data)
-        except RuntimeError as exc:
-            results[name] = {"error": str(exc), "figures": [], "tables": [], "tests": {}}
+        except Exception as exc:  # noqa: BLE001 - one category must not kill the run
+            results[name] = {
+                "error": f"{type(exc).__name__}: {exc}",
+                "figures": [],
+                "tables": [],
+                "tests": {},
+            }
 
     manifest = _manifest(data, selected, results, allow_archive=args.allow_archive_fallback)
     (OUT_ROOT / "data_manifest.json").write_text(
