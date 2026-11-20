@@ -69,8 +69,10 @@ Each figure has a companion `*_stats.csv` with one row per grower:
   precipitation mean/sd, per-grower Spearman rho and p-value.
 
 `data_manifest.json` records the run timestamp, figure names, per-farm field
-counts, CDL source, weather field counts, archived-field fallbacks, and all
-degradation notes.
+counts, CDL source, weather field counts, archived-field fallbacks, all
+degradation notes, and a `tests` block with the boundary Kruskal-Wallis
+p-values, the overall compactness-vs-size rho, and the overall GDD-precipitation
+rho and p-value. Per-grower correlation statistics live in the weather CSV.
 
 ## Data requirements and degradation
 

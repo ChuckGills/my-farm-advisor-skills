@@ -104,6 +104,23 @@ $PY scripts/render_grower_web_map.py \
   --grower il-corn-grower --grower ia-corn-grower --grower ne-corn-grower
 ```
 
+## EDA
+
+The field-level EDA lives in the `my-farm-advisor` skill at
+`eda/assignment-2-eda/` and runs as a read-only consumer of the dataset above:
+
+```bash
+cd "$DATA_PIPELINE_DATA_ROOT/data-pipeline/src"
+$PY scripts/eda/assignment2_eda.py
+```
+
+It writes three figures, three statistics tables, and a manifest to
+`$DATA_PIPELINE_DATA_ROOT/data-pipeline/eda/assignment-2/`. Boundaries cover
+all three growers; CDL and weather are compared across fields and growers, and
+CDL also across years within each field. No soil layer is read. While pipelines
+are still running, `--allow-archive-fallback` borrows archived previous-sample
+weather/CDL and labels the fallback in the figure and manifest.
+
 ## Expected coverage
 
 | Layer | Coverage |
@@ -114,6 +131,7 @@ $PY scripts/render_grower_web_map.py \
 | NDVI | Yearly composites 2021–2025 and crop joins |
 | Soil | SSURGO tables and maps from the full pipeline |
 | Web map | `growers/<grower>/derived/reports/grower_web_map.html` |
+| EDA | `eda/assignment-2/` figures, stats CSVs, and `data_manifest.json` |
 
 ## Verification
 

@@ -722,7 +722,7 @@ def figure_weather(data: list[FarmData]) -> tuple[Path, pd.DataFrame] | None:
             correlation_rows.append(
                 {
                     "grower": meta.label,
-                    "n_field_years": int(len(metrics)),
+                    "spearman_n": int(len(metrics)),
                     "spearman_rho": round(float(rho), 3),
                     "p_value": round(float(p_value), 4),
                 }
@@ -832,12 +832,15 @@ def _load_farm(meta: FarmMeta, *, allow_archive: bool) -> FarmData:
     return data
 
 
-def _manifest(data: list[FarmData], figures: list[Path]) -> dict[str, Any]:
+def _manifest(
+    data: list[FarmData], figures: list[Path], tests: dict[str, float]
+) -> dict[str, Any]:
     return {
         "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "dataset": "assignment-2",
         "output_dir": str(OUTPUT_DIR.relative_to(DATA_ROOT)),
         "figures": [path.name for path in figures],
+        "tests": tests,
         "farms": [
             {
                 "grower": d.meta.grower,
@@ -873,23 +876,30 @@ def main() -> None:
     data = [_load_farm(meta, allow_archive=args.allow_archive_fallback) for meta in FARMS]
 
     written: list[Path] = []
+    tests: dict[str, float] = {}
     boundary_out, boundary_stats = figure_boundaries(data)
     boundary_stats.to_csv(OUTPUT_DIR / "assignment2_boundaries_stats.csv", index=False)
     written.append(boundary_out)
+    for key, value in boundary_stats.attrs.items():
+        tests[key] = round(float(value), 4)
 
     cdl_result = figure_cdl(data)
     if cdl_result is not None:
         cdl_out, cdl_stats = cdl_result
         cdl_stats.to_csv(OUTPUT_DIR / "assignment2_cdl_stats.csv", index=False)
         written.append(cdl_out)
+        for key, value in cdl_stats.attrs.items():
+            tests[key] = round(float(value), 4)
 
     weather_result = figure_weather(data)
     if weather_result is not None:
         weather_out, weather_stats = weather_result
         weather_stats.to_csv(OUTPUT_DIR / "assignment2_weather_stats.csv", index=False)
         written.append(weather_out)
+        for key, value in weather_stats.attrs.items():
+            tests[key] = round(float(value), 4)
 
-    manifest = _manifest(data, written)
+    manifest = _manifest(data, written, tests)
     (OUTPUT_DIR / "data_manifest.json").write_text(
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
     )
