@@ -28,6 +28,7 @@ from lib.paths import DATA_ROOT, farm_boundary_path  # noqa: E402
 OUT_ROOT = DATA_ROOT / "eda" / "assignment-2"
 FIG_DIR = OUT_ROOT / "figures"
 TABLE_DIR = OUT_ROOT / "tables"
+REPORT_PATH = OUT_ROOT / "assignment2_report.pdf"
 
 GROWING_SEASON = (4, 10)
 GDD_BASE_C = 10.0
@@ -319,6 +320,76 @@ def p_label(p: float) -> str:
     return f"p = {p:.3f}"
 
 
+# ----------------------------------------------------------------- statistical
+# Multiple comparisons: the EDA runs a handful of tests on the same 30 fields, so
+# raw p-values overstate the evidence. Verdicts are driven by Holm-adjusted p.
+
+VERDICT_STRONG = "Strong"
+VERDICT_SUGGESTIVE = "Suggestive"
+VERDICT_NONE = "No clear effect"
+
+VERDICT_COLORS = {
+    VERDICT_STRONG: "#2E7D32",
+    VERDICT_SUGGESTIVE: "#B26A00",
+    VERDICT_NONE: "#6B7280",
+}
+
+
+def holm_adjust(pvalues: dict[str, float]) -> dict[str, float]:
+    """Holm step-down adjusted p-values for family-wise error control."""
+    finite = {key: float(value) for key, value in pvalues.items() if np.isfinite(value)}
+    keys = sorted(finite, key=lambda key: finite[key])
+    count = len(keys)
+    adjusted: dict[str, float] = {}
+    running = 0.0
+    for index, key in enumerate(keys):
+        value = (count - index) * finite[key]
+        running = max(running, value)
+        adjusted[key] = min(running, 1.0)
+    for key in pvalues:
+        adjusted.setdefault(key, float("nan"))
+    return adjusted
+
+
+def verdict(raw_p: float, adjusted_p: float) -> str:
+    """Three-level evidence label that never hides a failed correction."""
+    if not np.isfinite(raw_p):
+        return VERDICT_NONE
+    if np.isfinite(adjusted_p) and adjusted_p < 0.05:
+        return VERDICT_STRONG
+    if raw_p < 0.05:
+        return VERDICT_SUGGESTIVE
+    return VERDICT_NONE
+
+
+def year_block_test(frame: pd.DataFrame, column: str) -> tuple[float, float]:
+    """Friedman test with years as blocks: does the grower ranking persist?
+
+    Weather comes from a few shared NASA POWER grid cells, so field-years are
+    not independent replicates of a grower. Years are the honest replication
+    unit, so the comparison is done on grower-year means with years blocked.
+    """
+    wide = frame.pivot_table(index="year", columns="grower", values=column, aggfunc="mean")
+    wide = wide.dropna(axis=0, how="any")
+    if wide.shape[0] < 3 or wide.shape[1] < 3:
+        return float("nan"), float("nan")
+    try:
+        result = stats.friedmanchisquare(*[wide[col].to_numpy(dtype=float) for col in wide.columns])
+    except ValueError:
+        return float("nan"), float("nan")
+    return float(result.statistic), float(result.pvalue)
+
+
+def ranking_consistency(frame: pd.DataFrame, column: str, grower: str) -> tuple[int, int]:
+    """How often ``grower`` has the highest value in a year: (wins, years)."""
+    wide = frame.pivot_table(index="year", columns="grower", values=column, aggfunc="mean")
+    wide = wide.dropna(axis=0, how="any")
+    if wide.empty or grower not in wide.columns:
+        return 0, 0
+    wins = int((wide.idxmax(axis=1) == grower).sum())
+    return wins, int(len(wide))
+
+
 # --------------------------------------------------------------------- plotting
 
 
@@ -393,4 +464,4 @@ def save_figure(fig: plt.Figure, name: str) -> Path:
 
 
 def footnote(fig: plt.Figure, text: str, *, y: float = 0.005) -> None:
-    fig.text(0.995, y, text, ha="right", va="bottom", fontsize=7.0, color="#666666")
+    fig.text(0.995, y, text, ha="right", va="bottom", fontsize=8.6, color="#666666")

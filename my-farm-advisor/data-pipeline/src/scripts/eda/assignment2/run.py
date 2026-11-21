@@ -30,6 +30,7 @@ from eda.assignment2.common import (  # noqa: E402
     OUT_ROOT,
     TABLE_DIR,
     load_farm,
+    read_csv,
 )
 
 CATEGORIES: dict[str, Callable[[list[Any]], dict[str, Any]]] = {
@@ -135,10 +136,21 @@ def main() -> None:
 
     TABLE_DIR.mkdir(parents=True, exist_ok=True)
     tests = manifest["tests"]
-    if tests:
-        with (TABLE_DIR / "tests.csv").open("w", encoding="utf-8") as handle:
+    tests_path = TABLE_DIR / "tests.csv"
+    merged = tests
+    if len(selected) < len(CATEGORIES) and tests_path.exists():
+        # A partial rerun only refreshes its own categories; keep the rest so
+        # tests.csv stays a complete record of the last full run.
+        previous = read_csv(tests_path) if tests_path.exists() else None
+        if previous is not None and {"metric", "value"} <= set(previous.columns):
+            merged = {
+                **dict(zip(previous["metric"], previous["value"])),
+                **tests,
+            }
+    if merged:
+        with tests_path.open("w", encoding="utf-8") as handle:
             handle.write("metric,value\n")
-            for key, value in tests.items():
+            for key, value in merged.items():
                 handle.write(f"{key},{value}\n")
 
     print(f"Output: {OUT_ROOT}")

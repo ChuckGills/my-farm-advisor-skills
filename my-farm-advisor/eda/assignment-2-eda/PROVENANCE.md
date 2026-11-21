@@ -13,16 +13,17 @@ third-party code are stored in this repository.
 | Runtime outputs | `${DATA_PIPELINE_DATA_ROOT}/data-pipeline/eda/assignment-2/` | Generated locally, untracked |
 | Docs | `eda/assignment-2-eda/` | Written for this repository |
 
-Package modules:
+Package modules (nine figures plus the PDF):
 
 | Module | Responsibility |
 |---|---|
 | `common.py` | Runtime loaders, degradation rules, styling, statistics, figure saving |
 | `boundaries.py` | Acreage, compactness, size-vs-shape |
-| `cdl.py` | Rotation heat map, crop acreage, size-vs-diversity |
+| `cdl.py` | Rotation grid, crop share, rotation vs. size |
 | `weather.py` | Annual series, monthly profile, grower comparison |
 | `field_map.py` | Field atlas and map table |
 | `run.py` | CLI, category dispatch, manifest and `tests.csv` |
+| `report.py` | Single-file PDF report built from the tables and figures |
 
 ## Upstream data sources
 
@@ -47,13 +48,20 @@ All metrics are computed in the package, from the layers above:
   compactness is Polsby-Popper `4*pi*A/P^2`.
 - **Corn and soybean acres and shares** - field pixels by CDL class, pixel
   weighted at 30 m resolution, excluding `No Data` and `Unknown`.
-- **Crop diversity** - count of CDL classes covering at least 5 % of a
-  field-year; Shannon entropy is the fallback when that count has no variation.
+- **Dominant crop** - CDL class with the largest pixel share in a field-year;
+  a field-year is flagged as mixed when no class reaches 80 %.
+- **Rotation intensity** - years in corn out of the CDL window, and the number
+  of dominant-crop switches. Distinct-class counts saturate at one or two and
+  are kept only as a CSV column.
 - **GDD** - daily `(Tmax+Tmin)/2`, base 10 °C, cap 30 °C, summed Apr 1-Oct 31
   for field-years with at least 180 season days.
-- **Statistical tests** - SciPy `kruskal` for three-group comparisons,
-  `spearmanr` for monotonic association, and a one-way eta-squared computed
-  directly from group means for effect size.
+- **Statistical tests** - SciPy `kruskal` for three-group field-level
+  comparisons, `friedmanchisquare` with years as blocks for weather (fields in
+  one NASA POWER cell are not independent), `spearmanr` for monotonic
+  association, and a one-way eta-squared computed from group means.
+- **Multiple comparisons** - Holm step-down adjustment within each question
+  family (boundaries, weather, rotation); `report.py` prints raw and adjusted
+  p-values and also states the stricter all-eight-test result.
 
 ## Reproduction
 

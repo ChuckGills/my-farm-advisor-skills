@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""CDL/cropland EDA: rotation, crop composition, and diversity vs. field size.
+"""CDL/cropland EDA: rotation, crop mix, and rotation intensity vs. field size.
 
 Outputs
 -------
-figures/cdl_01_rotation_heatmap.png
-figures/cdl_02_crop_acres_by_grower_year.png
-figures/cdl_03_size_vs_diversity.png
+figures/cdl_01_rotation_grid.png
+figures/cdl_02_crop_share_by_grower_year.png
+figures/cdl_03_rotation_vs_size.png
 tables/cdl_field_year.csv
+tables/cdl_field_stats.csv
 tables/cdl_summary.csv
 """
 
@@ -17,18 +18,19 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.colors import BoundaryNorm, ListedColormap
+from matplotlib.ticker import FuncFormatter, NullFormatter
+from matplotlib.patches import Patch
 
 from .common import (
     CDL_PIXEL_ACRES,
     CORN,
     CROP_COLORS,
     DIVERSITY_MIN_SHARE,
-    FARMS,
     SOY,
     TABLE_DIR,
     FarmData,
     footnote,
-    grower_legend,
     jitter,
     kruskal,
     p_label,
@@ -37,7 +39,11 @@ from .common import (
     style_axes,
 )
 
+INK_TEXT = "#1F2933"
 EXCLUDED_CLASSES = {"No Data", "Unknown"}
+MIXED_THRESHOLD = 0.80
+DOMINANT_CODES = {"corn": 0, "soy": 1, "other": 2, "missing": 3}
+DOMINANT_NAMES = {0: CORN, 1: SOY, 2: "Other", 3: "No CDL"}
 
 
 def _shannon(shares: pd.Series) -> float:
@@ -66,6 +72,11 @@ def field_year_table(data: list[FarmData]) -> pd.DataFrame:
             significant = shares[shares >= DIVERSITY_MIN_SHARE]
             corn_share = float(shares.get(CORN, 0.0))
             soy_share = float(shares.get(SOY, 0.0))
+            other_share = float(max(0.0, 1.0 - corn_share - soy_share))
+            dominant = max(
+                (("corn", corn_share), ("soy", soy_share), ("other", other_share)),
+                key=lambda item: item[1],
+            )
             mapped_acres = valid_px * CDL_PIXEL_ACRES
             rows.append(
                 {
@@ -83,11 +94,42 @@ def field_year_table(data: list[FarmData]) -> pd.DataFrame:
                     ),
                     "corn_share": round(corn_share, 4),
                     "soy_share": round(soy_share, 4),
-                    "other_share": round(max(0.0, 1.0 - corn_share - soy_share), 4),
+                    "other_share": round(other_share, 4),
+                    "dominant_crop": dominant[0],
+                    "dominant_share": round(float(dominant[1]), 4),
                     "n_crop_classes": int(len(significant)),
                     "crop_diversity": round(_shannon(shares), 4),
                 }
             )
+    return pd.DataFrame(rows)
+
+
+def field_rotation_table(table: pd.DataFrame, data: list[FarmData]) -> pd.DataFrame:
+    """One row per field: acres and rotation history across the CDL window."""
+    acres = {
+        (farm.meta.label, str(row.field_id)): float(row.area_acres)
+        for farm in data
+        if farm.boundaries is not None
+        for row in farm.boundaries.itertuples(index=False)
+    }
+    rows: list[dict[str, Any]] = []
+    for (grower, field_id), group in table.groupby(["grower", "field_id"], sort=True):
+        group = group.sort_values("year")
+        crops = group["dominant_crop"].tolist()
+        switches = sum(1 for prev, cur in zip(crops, crops[1:]) if prev != cur)
+        rows.append(
+            {
+                "grower": grower,
+                "field_id": field_id,
+                "acres": round(acres.get((grower, field_id), float("nan")), 2),
+                "cdl_years": int(len(group)),
+                "corn_years": int((group["dominant_crop"] == "corn").sum()),
+                "soy_years": int((group["dominant_crop"] == "soy").sum()),
+                "other_years": int((group["dominant_crop"] == "other").sum()),
+                "corn_share_mean": round(float(group["corn_share"].mean()), 3),
+                "switches": int(switches),
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -116,69 +158,122 @@ def summary_table(data: list[FarmData], table: pd.DataFrame) -> pd.DataFrame:
 
 
 def figure_rotation(data: list[FarmData]) -> plt.Figure:
+    """Small multiples: one 10-field block per grower, years across."""
+    table = field_year_table(data)
     usable = [farm for farm in data if farm.cdl is not None]
-    table = field_year_table(usable)
-    rows = []
-    order = {meta.short: idx for idx, meta in enumerate(FARMS)}
-    for farm in usable:
+    years = sorted(table["year"].unique())
+
+    fig, axes = plt.subplots(
+        1, len(usable), figsize=(12.6, 4.9), sharey=True, gridspec_kw={"wspace": 0.12}
+    )
+    if len(usable) == 1:
+        axes = [axes]
+
+    colors = [
+        CROP_COLORS[CORN],
+        CROP_COLORS[SOY],
+        CROP_COLORS["Other"],
+        CROP_COLORS["No CDL"],
+    ]
+    cmap = ListedColormap(colors)
+    norm = BoundaryNorm(np.arange(-0.5, 4.5, 1.0), cmap.N)
+
+    for ax, farm in zip(axes, usable):
         subset = table[table["grower"] == farm.meta.label]
-        for field_id, group in subset.groupby("field_id", sort=True):
-            values = group.set_index("year")["corn_share"]
-            rows.append({"grower": farm.meta.short, "field_id": field_id, "values": values, "order": order[farm.meta.short]})
-    rows.sort(key=lambda row: (row["order"], row["field_id"]))
-    years = sorted({int(year) for row in rows for year in row["values"].index})
-    matrix = np.full((len(rows), len(years)), np.nan)
-    for i, row in enumerate(rows):
-        for j, year in enumerate(years):
-            if year in row["values"].index:
-                matrix[i, j] = float(row["values"].loc[year])
+        field_ids = sorted(subset["field_id"].unique())
+        matrix = np.full((len(field_ids), len(years)), DOMINANT_CODES["missing"], dtype=float)
+        mixed: list[tuple[int, int]] = []
+        for i, field_id in enumerate(field_ids):
+            block = subset[subset["field_id"] == field_id]
+            for j, year in enumerate(years):
+                row = block[block["year"] == year]
+                if row.empty:
+                    continue
+                matrix[i, j] = DOMINANT_CODES.get(str(row["dominant_crop"].iloc[0]),
+                                                  DOMINANT_CODES["missing"])
+                if float(row["dominant_share"].iloc[0]) < MIXED_THRESHOLD:
+                    mixed.append((i, j))
+        ax.pcolormesh(
+            np.arange(len(years) + 1),
+            np.arange(len(field_ids) + 1),
+            matrix,
+            cmap=cmap,
+            norm=norm,
+            edgecolors="white",
+            linewidth=1.2,
+        )
+        if mixed:
+            ax.scatter(
+                [j + 0.5 for _, j in mixed],
+                [i + 0.5 for i, _ in mixed],
+                s=34,
+                facecolor="none",
+                edgecolor="#1B1B1B",
+                linewidth=1.1,
+                zorder=5,
+            )
+        ax.set_xlim(0, len(years))
+        ax.set_ylim(len(field_ids), 0)
+        ax.set_xticks(np.arange(len(years)) + 0.5)
+        ax.set_xticklabels([str(year) for year in years], fontsize=9.5)
+        ax.set_yticks(np.arange(len(field_ids)) + 0.5)
+        ax.set_yticklabels([f"{idx + 1:02d}" for idx in range(len(field_ids))], fontsize=8.5)
+        ax.tick_params(length=0)
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        count = int(subset["field_id"].nunique())
+        ax.set_title(
+            f"{farm.meta.label} ({farm.meta.short}) \u00b7 {count} fields",
+            loc="left",
+            fontweight="bold",
+            fontsize=11.5,
+            pad=8,
+        )
+        ax.set_xlabel("CDL year", fontsize=9.5)
 
-    labels: list[str] = []
-    counters: dict[str, int] = {}
-    for row in rows:
-        counters[row["grower"]] = counters.get(row["grower"], 0) + 1
-        labels.append(f"{row['grower']}-{counters[row['grower']]:02d}")
-
-    fig, ax = plt.subplots(figsize=(7.8, max(5.4, 0.24 * len(rows) + 2.0)))
-    image = ax.imshow(
-        np.ma.masked_invalid(matrix),
-        aspect="auto",
-        cmap="YlGn",
-        vmin=0.0,
-        vmax=1.0,
-        interpolation="nearest",
+    axes[0].set_ylabel("field", fontsize=9.5)
+    fig.suptitle(
+        "Dominant crop per field: a stripe is rotation, repeated gold is continuous corn",
+        x=0.005,
+        y=0.985,
+        ha="left",
+        fontsize=12.5,
+        fontweight="bold",
     )
-    ax.set_xticks(np.arange(len(years)))
-    ax.set_xticklabels([str(year) for year in years])
-    ax.set_yticks(np.arange(len(labels)))
-    ax.set_yticklabels(labels, fontsize=8)
-    seen = 0
-    for row in rows[:-1]:
-        seen += 1
-        if row["grower"] != rows[seen]["grower"]:
-            ax.axhline(seen - 0.5, color="white", linewidth=3.0)
-    ax.set_title("Corn share of CDL pixels by field and year", loc="left", fontweight="bold")
-    colorbar = fig.colorbar(image, ax=ax, fraction=0.04, pad=0.02)
-    colorbar.set_label("Corn share", fontsize=8)
-    colorbar.ax.tick_params(labelsize=7)
-    sources = "; ".join(
-        f"{farm.meta.short}: {farm.cdl.source}" for farm in usable
+    handles = [
+        Patch(facecolor=CROP_COLORS[CORN], label=CORN),
+        Patch(facecolor=CROP_COLORS[SOY], label=SOY),
+        Patch(facecolor=CROP_COLORS["Other"], label="Other crop"),
+        Patch(
+            facecolor="none",
+            edgecolor="#1B1B1B",
+            linewidth=1.1,
+            label=f"Dot: no crop reaches {MIXED_THRESHOLD:.0%}",
+        ),
+    ]
+    fig.legend(
+        handles=handles,
+        loc="lower center",
+        ncol=4,
+        frameon=False,
+        fontsize=9.5,
+        handlelength=1.2,
     )
-    footnote(fig, f"CDL: {sources}. Pixel-weighted class shares; rows grouped by grower.")
-    fig.tight_layout(rect=(0, 0.03, 1, 1))
+    footnote(fig, "CDL 2021-2025; dominant class by pixel share.", y=0.012)
+    fig.subplots_adjust(left=0.055, right=0.985, top=0.795, bottom=0.26, wspace=0.12)
     return fig
 
 
-def figure_crop_acres(data: list[FarmData]) -> plt.Figure:
-    usable = [farm for farm in data if farm.cdl is not None]
-    table = field_year_table(usable)
+def figure_crop_share(data: list[FarmData]) -> plt.Figure:
+    table = field_year_table(data)
     per_year = (
         table.groupby(["grower", "year"])[["corn_acres", "soy_acres", "other_acres"]]
         .sum()
         .reset_index()
     )
-    growers = [farm.meta.label for farm in usable]
-    fig, axes = plt.subplots(1, len(growers), figsize=(4.8 * len(growers), 4.9), sharey=True)
+    per_year["total_acres"] = per_year[["corn_acres", "soy_acres", "other_acres"]].sum(axis=1)
+    growers = [farm.meta.label for farm in data if farm.cdl is not None]
+    fig, axes = plt.subplots(1, len(growers), figsize=(4.3 * len(growers), 4.6), sharey=True)
     if len(growers) == 1:
         axes = [axes]
     classes = [(CORN, "corn_acres"), (SOY, "soy_acres"), ("Other", "other_acres")]
@@ -188,114 +283,176 @@ def figure_crop_acres(data: list[FarmData]) -> plt.Figure:
             ax.text(0.5, 0.5, "No CDL", transform=ax.transAxes, ha="center", va="center")
             ax.set_title(grower, loc="left", fontweight="bold")
             continue
+        years = subset["year"].astype(int).astype(str).tolist()
         bottom = np.zeros(len(subset))
         for crop, column in classes:
-            values = subset[column].to_numpy(dtype=float)
+            shares = (subset[column] / subset["total_acres"]).to_numpy(dtype=float) * 100.0
             ax.bar(
-                subset["year"].astype(int).astype(str),
-                values,
+                years,
+                shares,
                 bottom=bottom,
                 color=CROP_COLORS[crop],
                 width=0.72,
                 label=crop,
                 edgecolor="white",
-                linewidth=0.6,
+                linewidth=0.8,
             )
-            bottom += values
-        ax.set_title(grower, loc="left", fontweight="bold")
+            bottom += shares
+        for x, (_, row) in zip(years, subset.iterrows()):
+            ax.text(
+                x,
+                101.0,
+                f"{row['total_acres']:,.0f} ac",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+                color="#444444",
+            )
+        ax.set_title(grower, loc="left", fontweight="bold", fontsize=12)
         ax.set_xlabel("CDL year")
+        ax.set_ylim(0, 118)
+        ax.set_yticks([0, 25, 50, 75, 100])
+        ax.set_yticklabels(["0%", "25%", "50%", "75%", "100%"])
         style_axes(ax, grid_axis="y")
-    axes[0].set_ylabel("Mapped acres (pixel-weighted)")
-    handles = [plt.Rectangle((0, 0), 1, 1, color=CROP_COLORS[crop]) for crop, _ in classes]
+    axes[0].set_ylabel("Share of mapped cropland")
+    handles = [Patch(facecolor=CROP_COLORS[crop], label=crop) for crop, _ in classes]
+    fig.legend(
+        handles=handles,
+        loc="lower center",
+        ncol=len(handles),
+        frameon=False,
+        fontsize=9.5,
+        bbox_to_anchor=(0.5, 0.045),
+    )
     fig.suptitle(
-        "Crop class acreage by grower and year",
-        x=0.01,
-        y=0.995,
+        "Corn share: Nebraska stays above half, Illinois alternates",
+        x=0.005,
+        y=0.99,
         ha="left",
-        fontsize=13,
+        fontsize=12.5,
         fontweight="bold",
     )
-    fig.legend(
-        handles,
-        [crop for crop, _ in classes],
-        loc="lower center",
-        ncol=len(classes),
-        frameon=False,
-        fontsize=9,
-        bbox_to_anchor=(0.5, 0.028),
+    footnote(
+        fig,
+        "Each bar is 100% of that grower-year, so farm size does not distort the comparison; "
+        "totals above bars are absolute mapped acres.",
+        y=0.008,
     )
-    footnote(fig, "Each CDL pixel = 30 m x 30 m = 0.2224 ac; acres exclude No Data pixels.", y=0.002)
-    fig.tight_layout(rect=(0, 0.085, 1, 0.93))
+    fig.tight_layout(rect=(0, 0.15, 1, 0.93))
     return fig
 
 
-def figure_size_vs_diversity(data: list[FarmData]) -> plt.Figure:
+def figure_rotation_vs_size(data: list[FarmData]) -> plt.Figure:
+    table = field_year_table(data)
+    fields = field_rotation_table(table, data).dropna(subset=["acres"])
     usable = [farm for farm in data if farm.cdl is not None]
-    table = field_year_table(usable)
-    acres = {
-        (farm.meta.label, str(row.field_id)): float(row.area_acres)
-        for farm in usable
-        for row in farm.boundaries.itertuples(index=False)
-    }
-    table = table.assign(acres=[acres.get((row.grower, str(row.field_id)), np.nan) for row in table.itertuples()])
-    table = table.dropna(subset=["acres"])
+    fig, axes = plt.subplots(1, 2, figsize=(12.4, 4.9))
 
-    # Distinct crop classes are integer and often saturate; fall back to Shannon
-    # diversity when the class count carries no usable variation.
-    y_field = "n_crop_classes"
-    y_label = "Distinct crop classes per field-year (>= 5% share)"
-    if table[y_field].nunique() < 2:
-        y_field = "crop_diversity"
-        y_label = "Shannon crop diversity per field-year"
-
-    fig, ax = plt.subplots(figsize=(7.8, 5.4))
+    ax = axes[0]
     for farm in usable:
-        subset = table[table["grower"] == farm.meta.label]
+        subset = fields[fields["grower"] == farm.meta.label]
         if subset.empty:
             continue
-        x = subset["acres"].to_numpy(dtype=float)
-        y = subset[y_field].to_numpy(dtype=float)
-        offset = jitter(len(y), width=0.06) if y_field == "n_crop_classes" else 0.0
         ax.scatter(
-            x,
-            y + offset,
-            s=38,
+            subset["acres"],
+            subset["corn_years"] + jitter(len(subset), width=0.07),
+            s=62,
             color=farm.meta.color,
             edgecolor="white",
-            linewidth=0.5,
-            alpha=0.85,
+            linewidth=0.7,
+            alpha=0.9,
             label=farm.meta.label,
             zorder=3,
         )
-    rho, p_value = spearman(table["acres"].to_numpy(dtype=float), table[y_field].to_numpy(dtype=float))
-    per_grower = []
-    for farm in usable:
-        subset = table[table["grower"] == farm.meta.label]
-        if len(subset) >= 3:
-            r, _ = spearman(subset["acres"].to_numpy(dtype=float), subset[y_field].to_numpy(dtype=float))
-            per_grower.append(f"{farm.meta.short} rho = {r:.2f}")
+    rho, p_value = spearman(
+        fields["acres"].to_numpy(dtype=float), fields["corn_years"].to_numpy(dtype=float)
+    )
     ax.set_xscale("log")
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{value:,.0f}"))
+    ax.xaxis.set_minor_formatter(NullFormatter())
     ax.set_xlabel("Field area (acres, log scale)")
-    ax.set_ylabel(y_label)
-    ax.set_title("Does field size explain crop diversity?", loc="left", fontweight="bold")
+    ax.set_ylabel("Years in corn out of 5")
+    ax.set_yticks([0, 1, 2, 3, 4, 5])
+    ax.set_ylim(-0.6, 5.6)
+    ax.set_title("One point per field", loc="left", fontweight="bold", fontsize=11.5)
     ax.text(
-        0.02,
-        0.98,
-        f"Spearman rho = {rho:.2f} ({p_label(p_value)}), n = {len(table)} field-years\n"
-        + " | ".join(per_grower),
+        0.03,
+        0.96,
+        f"Spearman rho = {rho:.2f} ({p_label(p_value)})\nn = {len(fields)} fields",
         transform=ax.transAxes,
         ha="left",
         va="top",
-        fontsize=8.8,
-        bbox={"facecolor": "white", "alpha": 0.9, "edgecolor": "#cccccc"},
+        fontsize=9,
+        bbox={"facecolor": "white", "alpha": 0.92, "edgecolor": "#dddddd"},
     )
-    if y_field == "n_crop_classes":
-        ax.yaxis.set_major_locator(plt.MaxNLocator(integer=True))
-        ax.set_ylim(0.6, max(3.2, float(table[y_field].max()) + 0.6))
-    style_axes(ax)
-    grower_legend(ax, [farm.meta for farm in usable], loc="upper right", fontsize=9)
-    footnote(fig, "Each point is one field-year; diversity counts CDL classes covering >= 5% of the field.")
-    fig.tight_layout(rect=(0, 0.03, 1, 1))
+    ax.legend(frameon=False, fontsize=9, loc="lower right")
+    style_axes(ax, grid_axis="y")
+
+    ax = axes[1]
+    bins = pd.qcut(fields["acres"], 4, labels=["Q1", "Q2", "Q3", "Q4"])
+    binned = (
+        fields.assign(size_quartile=bins)
+        .groupby("size_quartile", observed=True)
+        .agg(
+            median_corn=("corn_years", "median"),
+            low=("acres", "min"),
+            high=("acres", "max"),
+            n=("corn_years", "size"),
+        )
+    )
+    positions = np.arange(len(binned))
+    ax.bar(
+        positions,
+        binned["median_corn"],
+        width=0.62,
+        color="#8FA9BF",
+        edgecolor="white",
+        linewidth=0.8,
+        zorder=3,
+    )
+    for pos, (_, row) in zip(positions, binned.iterrows()):
+        ax.text(
+            pos,
+            float(row["median_corn"]) + 0.12,
+            f"{float(row['median_corn']):.1f}",
+            ha="center",
+            va="bottom",
+            fontsize=10,
+            color=INK_TEXT,
+            fontweight="bold",
+        )
+    ax.set_xticks(positions)
+    ax.set_xticklabels(
+        [
+            f"{row['low']:,.0f}-{row['high']:,.0f} ac\n(n={int(row['n'])})"
+            for _, row in binned.iterrows()
+        ],
+        fontsize=8.5,
+    )
+    ax.set_ylim(0, 5)
+    ax.set_yticks([0, 1, 2, 3, 4, 5])
+    ax.set_ylabel("Median years in corn out of 5")
+    ax.set_title(
+        "Same answer by size quartile", loc="left", fontweight="bold", fontsize=11.5
+    )
+    ax.annotate(
+        f"Spearman rho = {rho:.2f} ({p_label(p_value)})",
+        xy=(0.03, 0.96),
+        xycoords="axes fraction",
+        ha="left",
+        va="top",
+        fontsize=9,
+        bbox={"facecolor": "white", "alpha": 0.92, "edgecolor": "#dddddd"},
+    )
+    style_axes(ax, grid_axis="y")
+    ax.margins(x=0.06)
+
+    footnote(
+        fig,
+        "One point per field. A year counts as corn (soy) when corn (soy) is the dominant "
+        "CDL class. p-values are corrected across the report's tests.",
+    )
+    fig.tight_layout(rect=(0, 0.04, 1, 1))
     return fig
 
 
@@ -321,39 +478,40 @@ def run(data: list[FarmData]) -> dict[str, Any]:
         raise RuntimeError("No CDL composition data available for any farm")
 
     table = field_year_table(usable)
+    fields = field_rotation_table(table, usable)
     summary = summary_table(usable, table)
 
     figures = [
-        save_figure(figure_rotation(usable), "cdl_01_rotation_heatmap.png"),
-        save_figure(figure_crop_acres(usable), "cdl_02_crop_acres_by_grower_year.png"),
-        save_figure(figure_size_vs_diversity(usable), "cdl_03_size_vs_diversity.png"),
+        save_figure(figure_rotation(usable), "cdl_01_rotation_grid.png"),
+        save_figure(figure_crop_share(usable), "cdl_02_crop_share_by_grower_year.png"),
+        save_figure(figure_rotation_vs_size(usable), "cdl_03_rotation_vs_size.png"),
     ]
 
     TABLE_DIR.mkdir(parents=True, exist_ok=True)
     table.to_csv(TABLE_DIR / "cdl_field_year.csv", index=False)
+    fields.to_csv(TABLE_DIR / "cdl_field_stats.csv", index=False)
     summary.to_csv(TABLE_DIR / "cdl_summary.csv", index=False)
 
-    acres = {
-        (farm.meta.label, str(row.field_id)): float(row.area_acres)
-        for farm in usable
-        for row in farm.boundaries.itertuples(index=False)
-    }
-    table = table.assign(acres=[acres.get((row.grower, str(row.field_id)), np.nan) for row in table.itertuples()])
-    table = table.dropna(subset=["acres"])
-    y_field = "n_crop_classes"
-    if table[y_field].nunique() < 2:
-        y_field = "crop_diversity"
-    rho, p_value = spearman(table["acres"].to_numpy(dtype=float), table[y_field].to_numpy(dtype=float))
+    rho, rho_p = spearman(
+        fields["acres"].to_numpy(dtype=float), fields["corn_years"].to_numpy(dtype=float)
+    )
     _, corn_p = kruskal(
         [group["corn_share"].to_numpy() for _, group in table.groupby("grower")]
     )
+    _, corn_years_p = kruskal(
+        [group["corn_years"].to_numpy() for _, group in fields.groupby("grower")]
+    )
     return {
         "figures": [str(path) for path in figures],
-        "tables": [str(TABLE_DIR / "cdl_field_year.csv"), str(TABLE_DIR / "cdl_summary.csv")],
+        "tables": [
+            str(TABLE_DIR / "cdl_field_year.csv"),
+            str(TABLE_DIR / "cdl_field_stats.csv"),
+            str(TABLE_DIR / "cdl_summary.csv"),
+        ],
         "tests": {
             "cdl.corn_share_kruskal_p": round(corn_p, 4),
-            "cdl.size_diversity_spearman_rho": round(rho, 3),
-            "cdl.size_diversity_spearman_p": round(p_value, 4),
-            "cdl.diversity_field": y_field,
+            "cdl.corn_years_kruskal_p": round(corn_years_p, 4),
+            "cdl.size_corn_years_spearman_rho": round(rho, 3),
+            "cdl.size_corn_years_spearman_p": round(rho_p, 4),
         },
     }

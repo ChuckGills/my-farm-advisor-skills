@@ -112,9 +112,10 @@ The field-level EDA lives in the `my-farm-advisor` skill at
 ```bash
 cd "$DATA_PIPELINE_DATA_ROOT/data-pipeline/src"
 $PY scripts/eda/assignment2/run.py
+$PY scripts/eda/assignment2/report.py
 ```
 
-It writes ten figures, the matching tables, and a manifest to
+`run.py` writes nine figures, the matching tables, and a manifest to
 `$DATA_PIPELINE_DATA_ROOT/data-pipeline/eda/assignment-2/` (`figures/`,
 `tables/`). Categories are `boundaries`, `cdl`, `weather`, and `map`; repeat
 `--category` to run a subset. Boundaries cover all three growers; CDL and
@@ -122,6 +123,15 @@ weather are compared across fields and growers, and CDL also across years
 within each field. No soil layer is read. While pipelines are still running,
 `--allow-archive-fallback` borrows archived previous-sample weather/CDL and
 labels the fallback in the figure and manifest.
+
+Weather is tested on distinct NASA POWER grid cells with years as blocks, not
+on 150 field-years, because fields in one cell share an identical series. The
+manifest records the effective sample sizes.
+
+`report.py` then builds `assignment2_report.pdf`: a ranked summary, a county
+map, one page per finding (strongest first), and a methods page. It is a
+read-only consumer of the tables and figures and applies Holm correction within
+each question family.
 
 ## Expected coverage
 
@@ -133,7 +143,7 @@ labels the fallback in the figure and manifest.
 | NDVI | Yearly composites 2021–2025 and crop joins |
 | Soil | SSURGO tables and maps from the full pipeline |
 | Web map | `growers/<grower>/derived/reports/grower_web_map.html` |
-| EDA | `eda/assignment-2/figures/` (10 PNGs), `tables/` CSVs, and `data_manifest.json` |
+| EDA | `eda/assignment-2/figures/` (9 PNGs), `tables/` CSVs, `assignment2_report.pdf`, and `data_manifest.json` |
 
 ## Verification
 
