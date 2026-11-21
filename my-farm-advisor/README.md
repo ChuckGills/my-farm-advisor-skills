@@ -281,6 +281,33 @@ The umbrella entrypoint is [`SKILL.md`](SKILL.md). From there, the skill routes 
 | Strategy         | Crop strategy and maturity planning workflows                          | [`strategy/INDEX.md`](strategy/INDEX.md)                 |
 | Weather          | NASA POWER weather ingestion and downstream weather analysis           | [`weather/INDEX.md`](weather/INDEX.md)                   |
 
+## Assignment 2 example: custom EDA subskill
+
+[`eda/assignment-2-eda/`](eda/assignment-2-eda/README.md) is a worked example of
+building a dataset-specific EDA on top of this skill rather than a generic
+guide. It compares three corn/soybean growers (Illinois, Iowa, Nebraska; ten
+fields each) on field boundaries, NASA POWER weather, and the USDA Cropland Data
+Layer, with no soil analysis.
+
+It is deliberately narrow: two statistical visualizations plus one comparison or
+correlation per category, one geospatial map, static Python only. The reusable
+contract is figures plus tidy CSVs; a separate entrypoint renders them into a
+single nine-page PDF report, committed once at
+[`eda/assignment-2-eda/report/assignment2_report.pdf`](eda/assignment-2-eda/report/assignment2_report.pdf).
+
+```bash
+cd "$DATA_PIPELINE_DATA_ROOT/data-pipeline/src"
+"$DATA_PIPELINE_DATA_ROOT/data-pipeline/.venv/bin/python" \
+  scripts/eda/assignment2/run.py
+"$DATA_PIPELINE_DATA_ROOT/data-pipeline/.venv/bin/python" \
+  scripts/eda/assignment2/report.py
+```
+
+To add a dataset-specific EDA of your own, copy that folder's shape: a `SKILL.md`
+router, a `GUIDE.md` runbook, a `PROVENANCE.md` source record, and a generator
+package under `data-pipeline/src/scripts/eda/`, linked from
+[`eda/INDEX.md`](eda/INDEX.md).
+
 ## Typical Workflow
 
 ```mermaid

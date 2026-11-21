@@ -37,6 +37,13 @@ per finding, and a methods page. Page order and the cover table follow evidence
 strength, strongest first. Every number in the text is recomputed from the CSVs,
 so the prose cannot drift from the data.
 
+A committed copy lives at
+[`report/assignment2_report.pdf`](report/assignment2_report.pdf). That file is a
+**one-time assignment snapshot**, not a live output: regenerate it locally with
+`report.py` after re-running the EDA, and do not commit the refreshed copy. It is
+the only generated artifact kept in Git — the PNGs, CSVs and manifest stay under
+`${DATA_PIPELINE_DATA_ROOT}` as usual.
+
 ## Boundaries (`--category boundaries`)
 
 | Figure | Question | View |
