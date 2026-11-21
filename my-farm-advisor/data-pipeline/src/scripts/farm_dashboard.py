@@ -341,6 +341,8 @@ def _run_pipeline_for_farm(
     farm_name: str,
     inventory_path: Path,
     force: bool,
+    cdl_latest_year: int | None = None,
+    cdl_window_years: int | None = None,
 ) -> None:
     cmd = [
         sys.executable,
@@ -356,6 +358,10 @@ def _run_pipeline_for_farm(
         "--inventory-csv",
         str(inventory_path),
     ]
+    if cdl_latest_year is not None:
+        cmd.extend(["--cdl-latest-year", str(cdl_latest_year)])
+    if cdl_window_years is not None:
+        cmd.extend(["--cdl-window-years", str(cdl_window_years)])
     if force:
         cmd.append("--force")
     _run(cmd)
@@ -442,6 +448,8 @@ def create_command(args: argparse.Namespace) -> None:
         farm_name=farm_name,
         inventory_path=inventory,
         force=args.force,
+        cdl_latest_year=args.cdl_latest_year,
+        cdl_window_years=args.cdl_window_years,
     )
 
     print(
@@ -493,11 +501,23 @@ def _discover_farms(
             boundary = farm_dir / "boundary" / "field_boundaries.geojson"
             if not boundary.exists():
                 continue
+            # Prefer the display name recorded when the farm was seeded; falling
+            # back to the slug silently renamed refreshed farms in reports.
+            farm_name = f_slug.replace("-", " ").title()
+            metadata_path = farm_dir / "farm.json"
+            if metadata_path.exists():
+                try:
+                    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    metadata = {}
+                recorded_name = str(metadata.get("display_name") or "").strip()
+                if recorded_name:
+                    farm_name = recorded_name
             farms.append(
                 {
                     "grower_slug": g_slug,
                     "farm_slug": f_slug,
-                    "farm_name": f_slug.replace("-", " ").title(),
+                    "farm_name": farm_name,
                 }
             )
     if not farms:

@@ -35,9 +35,17 @@ from paths import DATA_ROOT, SCRIPTS_ROOT, farm_boundary_path, farm_manifest_dir
 
 OVERPASS_URLS = [
     "https://overpass-api.de/api/interpreter",
+    "https://z.overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
     "https://lz4.overpass-api.de/api/interpreter",
 ]
+
+# Overpass rejects the default python-requests User-Agent with HTTP 406.
+OVERPASS_HEADERS = {
+    "User-Agent": (
+        "my-farm-advisor/1.0 (+https://github.com/borealBytes/my-farm-advisor-skills)"
+    )
+}
 COUNTIES_PATH = shared_geoadmin_counties_dir() / "counties_usa.geojson"
 
 
@@ -110,7 +118,12 @@ def _query_overpass_bbox(bbox: tuple[float, float, float, float]) -> dict:
     for endpoint in OVERPASS_URLS:
         for attempt in range(1, 4):
             try:
-                response = requests.post(endpoint, data={"data": query}, timeout=240)
+                response = requests.post(
+                    endpoint,
+                    data={"data": query},
+                    headers=OVERPASS_HEADERS,
+                    timeout=240,
+                )
                 response.raise_for_status()
                 return response.json()
             except Exception as exc:
@@ -279,6 +292,12 @@ def main() -> None:
     )
     parser.add_argument("--county-name", required=True, help="County name, e.g. Boone")
     parser.add_argument("--count", type=int, default=4, help="Number of fields to sample")
+    parser.add_argument(
+        "--min-acres",
+        type=float,
+        default=0.5,
+        help="Minimum field area in acres (default: 0.5)",
+    )
     parser.add_argument("--seed", type=int, default=42, help="Deterministic seed")
     parser.add_argument("--grower-slug", required=True)
     parser.add_argument("--farm-slug", required=True)
@@ -322,6 +341,7 @@ def main() -> None:
         county_fips=county_fips,
         county_name=county_name,
     )
+    fields = fields[fields["area_acres"] >= args.min_acres].reset_index(drop=True)
     sampled = _sample_fields(fields, count=args.count, seed=args.seed)
     if sampled.empty:
         raise RuntimeError("No eligible farmland polygons found for requested county")
